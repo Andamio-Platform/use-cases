@@ -1,0 +1,187 @@
+:root {
+  --andamio-orange: #ff6b35;
+  --andamio-orange-strong: #d65522;
+  --andamio-orange-dark: #ff7a52;
+  --andamio-blue: #004e89;
+  --andamio-blue-dark: #3b82f6;
+  --andamio-border-light: rgba(0, 78, 137, 0.12);
+  --andamio-border-dark: rgba(59, 130, 246, 0.2);
+  --x-font-sans: Inter, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(0, 78, 137, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(255, 107, 53, 0.12), transparent 32%),
+    rgb(var(--nextra-bg));
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.16), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 122, 82, 0.12), transparent 34%),
+    rgb(var(--nextra-bg));
+}
+
+.andamio-shell {
+  min-height: 100vh;
+}
+
+.andamio-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.andamio-logo__asset {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 196px;
+}
+
+.andamio-logo__image {
+  display: block;
+  height: auto;
+  width: 196px;
+}
+
+.andamio-logo__image--dark {
+  display: none;
+}
+
+.dark .andamio-logo__image--light {
+  display: none;
+}
+
+.dark .andamio-logo__image--dark {
+  display: block;
+}
+
+.andamio-logo__context {
+  color: rgba(0, 78, 137, 0.72);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.dark .andamio-logo__context {
+  color: rgba(59, 130, 246, 0.78);
+}
+
+.nextra-nav-container,
+.nextra-sidebar-container {
+  backdrop-filter: blur(18px);
+}
+
+article h1,
+article h2,
+article h3,
+article h4 {
+  color: var(--andamio-blue);
+}
+
+.dark article h1,
+.dark article h2,
+.dark article h3,
+.dark article h4 {
+  color: var(--andamio-blue-dark);
+}
+
+article a {
+  color: var(--andamio-orange);
+}
+
+article a:hover {
+  color: var(--andamio-orange-strong);
+}
+
+.dark article a:hover {
+  color: var(--andamio-orange-dark);
+}
+
+article blockquote,
+article table,
+article th,
+article td {
+  border-color: var(--andamio-border-light);
+}
+
+.dark article blockquote,
+.dark article table,
+.dark article th,
+.dark article td {
+  border-color: var(--andamio-border-dark);
+}
+
+.andamio-home-intro {
+  margin-top: 0.5rem;
+  margin-bottom: 2rem;
+}
+
+.andamio-home-intro__eyebrow {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--andamio-orange);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.andamio-home-intro__lead {
+  max-width: 44rem;
+  color: rgba(15, 23, 42, 0.82);
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
+
+.dark .andamio-home-intro__lead {
+  color: rgba(241, 245, 249, 0.78);
+}
+
+.andamio-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  font-size: 0.95rem;
+}
+
+.andamio-footer p {
+  margin: 0;
+}
+
+.andamio-footer a {
+  color: var(--andamio-orange);
+}
+
+@media (max-width: 768px) {
+  .andamio-logo {
+    gap: 0.5rem;
+  }
+
+  .andamio-logo__asset {
+    min-width: 150px;
+  }
+
+  .andamio-logo__image {
+    width: 150px;
+  }
+
+  .andamio-logo__context {
+    display: none;
+  }
+
+  .andamio-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
