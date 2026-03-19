@@ -3,289 +3,329 @@ import { config } from './config.js';
 import { getAuthUrl, getAccessToken, getDiscordUser, getAccountCreationDate } from './oauth2.js';
 import { assignRole, startBot } from './discord.js';
 import { checkNftOwnership, checkAccountAge, checkCredential } from './validators.js';
+import {
+  renderLandingPage,
+  renderMessagePage,
+  renderVerificationResultPage,
+  renderWalletConnectPage,
+  type VerificationStep,
+} from './ui.js';
 
 const app = express();
 const port = config.PORT;
 
-// Middleware to parse form data
 app.use(express.urlencoded({ extended: true }));
 
-// Start the Discord Bot
 startBot();
 
-// In-memory "session" mapping to store user info during the flow
-// In production, use a proper session/database!
 const userSessions: Record<string, { discordId: string; username: string }> = {};
 
-// Root route - Display a simple "Verify" button
-app.get('/', (req: Request, res: Response) => {
-  res.send(`
-    <html>
-      <head><title>Discord Verification</title></head>
-      <body>
-        <h1>Verify your Discord Role</h1>
-        <p>This will check your Cardano NFT ownership and account age before granting the role.</p>
-        <a href="/login" style="padding: 10px 20px; background-color: #5865F2; color: white; text-decoration: none; border-radius: 5px;">Login with Discord</a>
-      </body>
-    </html>
-  `);
+function createVerificationSteps(): VerificationStep[] {
+  return [
+    {
+      title: 'Discord account age',
+      summary: 'Confirm the connected Discord account is old enough to pass the minimum age rule.',
+      status: 'blocked',
+    },
+    {
+      title: 'Wallet asset validation',
+      summary: 'Check the submitted Cardano address for an NFT under the configured policy ID.',
+      status: 'blocked',
+    },
+    {
+      title: 'Andamio credential',
+      summary: 'Validate the required Andamio credential on one of the detected wallet handles.',
+      status: 'blocked',
+    },
+    {
+      title: 'Discord role assignment',
+      summary: 'Grant the configured Discord role after every eligibility check passes.',
+      status: 'blocked',
+    },
+  ];
+}
+
+function markStepComplete(steps: VerificationStep[], index: number, detail: string) {
+  steps[index] = {
+    ...steps[index],
+    status: 'complete',
+    detail,
+  };
+}
+
+function markStepFailed(steps: VerificationStep[], index: number, detail: string) {
+  steps[index] = {
+    ...steps[index],
+    status: 'failed',
+    detail,
+  };
+}
+
+function markRemainingBlocked(
+  steps: VerificationStep[],
+  startIndex: number,
+  detail = 'This check did not run because an earlier requirement blocked the flow.',
+) {
+  for (let index = startIndex; index < steps.length; index += 1) {
+    if (steps[index].status === 'blocked' && !steps[index].detail) {
+      steps[index] = {
+        ...steps[index],
+        detail,
+      };
+    }
+  }
+}
+
+function normalizeReason(reason: string | string[] | undefined, fallback: string): string {
+  if (Array.isArray(reason) && reason.length > 0) {
+    return reason.join(', ');
+  }
+
+  if (typeof reason === 'string' && reason.trim().length > 0) {
+    return reason.trim();
+  }
+
+  return fallback;
+}
+
+function extractAliases(reason: string | string[] | undefined): string[] {
+  if (!Array.isArray(reason)) {
+    return [];
+  }
+
+  return reason.filter((alias) => typeof alias === 'string' && alias.trim().length > 0);
+}
+
+function describeAliases(aliases: string[]): string {
+  if (aliases.length === 0) {
+    return 'A matching wallet asset was found on the submitted address.';
+  }
+
+  return `Detected wallet handles: ${aliases.join(', ')}`;
+}
+
+app.get('/', (_req: Request, res: Response) => {
+  res.send(renderLandingPage());
 });
 
-// Redirect to Discord OAuth2
-app.get('/login', (req: Request, res: Response) => {
+app.get('/login', (_req: Request, res: Response) => {
   res.redirect(getAuthUrl());
 });
 
-// OAuth2 Callback
 app.get('/callback', async (req: Request, res: Response) => {
   const code = req.query.code as string;
+
   if (!code) {
-    return res.status(400).send('No code provided');
+    return res.status(400).send(
+      renderMessagePage({
+        title: 'Missing Discord code',
+        eyebrow: 'Discord callback',
+        heading: 'No authorization code was provided.',
+        lead: 'The Discord OAuth callback did not include a valid code. Restart the login flow and try again.',
+        tone: 'danger',
+        primaryAction: { href: '/login', label: 'Login with Discord', variant: 'primary' },
+        secondaryAction: { href: '/', label: 'Back to start', variant: 'secondary' },
+      }),
+    );
   }
 
   try {
-    // 1. Exchange code for access token
     const accessToken = await getAccessToken(code);
-
-    // 2. Identify user
     const user = await getDiscordUser(accessToken);
 
-    // Store in session (temp id for state)
     const sessionId = Math.random().toString(36).substring(7);
     userSessions[sessionId] = { discordId: user.id, username: user.username };
 
-    // 3. Prompt for Cardano Wallet Connection
-    res.send(`
-      <html>
-        <head>
-          <title>Cardano Wallet Connection</title>
-          <style>
-            body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
-            .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 100%; }
-            .wallet-button { 
-              display: flex; align-items: center; justify-content: space-between;
-              width: 100%; padding: 12px; margin: 8px 0; 
-              border: 1px solid #ddd; border-radius: 8px; 
-              background: white; cursor: pointer; font-size: 16px; transition: background 0.2s;
-            }
-            .wallet-button:hover { background: #f8f9fa; border-color: #0033ad; }
-            .wallet-icon { width: 24px; height: 24px; }
-            #status { margin-top: 1rem; color: #666; font-size: 14px; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h1>Step 2: Connect Wallet</h1>
-            <p>Logged in as: <b>${user.username}</b></p>
-            <p>Please select your Cardano wallet to verify ownership:</p>
-            
-            <div id="wallet-list">Loading wallets...</div>
-            <div id="status"></div>
-
-            <form id="verify-form" action="/verify-final" method="POST" style="display: none;">
-              <input type="hidden" name="sessionId" value="${sessionId}">
-              <input type="hidden" name="cardanoAddress" id="cardanoAddress">
-            </form>
-          </div>
-
-          <script type="module">
-            const walletListDiv = document.getElementById('wallet-list');
-            const status = document.getElementById('status');
-
-            async function loadMesh() {
-              const bundleUrls = [
-                'https://esm.sh/@meshsdk/core@2.1.8?bundle',
-                'https://esm.sh/@meshsdk/wallet@2.1.8?bundle',
-                'https://cdn.jsdelivr.net/npm/@meshsdk/core@2.1.8/+esm'
-              ];
-
-              for (const url of bundleUrls) {
-                try {
-                  console.log('Attempting to load bundled Mesh SDK from:', url);
-                  const mesh = await import(url);
-                  // Mesh v2 exports BrowserWallet in both core and wallet
-                  const BrowserWallet = mesh.BrowserWallet || mesh.default?.BrowserWallet;
-                  if (BrowserWallet) {
-                    console.log('Mesh SDK loaded successfully from:', url);
-                    return BrowserWallet;
-                  }
-                } catch (e) {
-                  console.warn('Failed to load bundle from ' + url + ':', e.message);
-                }
-              }
-              return null;
-            }
-
-            // Fallback for raw wallet discovery if library fails
-            function getRawWallets() {
-              if (!window.cardano) return [];
-              return Object.keys(window.cardano)
-                .filter(id => window.cardano[id].apiVersion)
-                .map(id => ({
-                  id: id,
-                  name: window.cardano[id].name || id,
-                  icon: window.cardano[id].icon,
-                  version: window.cardano[id].apiVersion
-                }));
-            }
-
-            async function start() {
-              console.log('Verification script starting...');
-              try {
-                status.innerText = 'Initializing...';
-                
-                // Try to load the library
-                const BrowserWallet = await loadMesh();
-                
-                // Even if library fails, we can still show wallets and try raw connection
-                await new Promise(r => setTimeout(r, 1000));
-                
-                let wallets = [];
-                if (BrowserWallet) {
-                  wallets = BrowserWallet.getInstalledWallets();
-                } else {
-                  console.warn('Mesh library failed to load, falling back to raw discovery');
-                  wallets = getRawWallets();
-                }
-
-                if (!wallets || wallets.length === 0) {
-                  walletListDiv.innerHTML = \`
-                    <div style="color: #856404; background-color: #fff3cd; padding: 15px; border-radius: 8px; border: 1px solid #ffeeba; margin-bottom: 15px;">
-                      <strong>No Wallets Found</strong><br>
-                      <p style="font-size: 13px; margin: 10px 0;">We couldn't detect any Cardano extensions in your browser.</p>
-                    </div>
-                    <button onclick="window.location.reload()" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
-                      Scan Again
-                    </button>
-                  \`;
-                  status.innerText = '';
-                  return;
-                }
-
-                status.innerText = 'Select your Cardano wallet:';
-                walletListDiv.innerHTML = '';
-                
-                wallets.forEach(wallet => {
-                  const btn = document.createElement('button');
-                  btn.className = 'wallet-button';
-                  btn.innerHTML = \`
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                      <img src="\${wallet.icon}" class="wallet-icon">
-                      <span style="font-weight: 500;">\${wallet.name.charAt(0).toUpperCase() + wallet.name.slice(1)}</span>
-                    </div>
-                    <span style="font-size: 12px; color: #666;">\${wallet.version ? 'v' + wallet.version : ''}</span>
-                  \`;
-                  btn.onclick = () => connect(BrowserWallet, wallet.id || wallet.name);
-                  walletListDiv.appendChild(btn);
-                });
-              } catch (err) {
-                console.error('Final start error:', err);
-                status.innerText = 'An error occurred during initialization.';
-              }
-            }
-
-            async function connect(BrowserWallet, walletId) {
-              try {
-                status.innerText = 'Connecting to wallet...';
-
-                let address = '';
-                if (BrowserWallet) {
-                  const wallet = await BrowserWallet.enable(walletId);
-                  status.innerText = 'Wallet connected! Fetching address...';
-                  address = await wallet.getChangeAddress();
-                } else {
-                  const api = await window.cardano[walletId].enable();
-                  status.innerText = 'Connected! Retrieving address...';
-                  const hexAddress = await api.getChangeAddress();
-
-                  // Decode hex address to bech32 using the CSL library if available,
-                  // otherwise fall back to raw hex and let the server handle it
-                  if (window.CardanoWasm) {
-                    const cslAddress = window.CardanoWasm.Address.from_bytes(
-                      Buffer.from(hexAddress, 'hex')
-                    );
-                    address = cslAddress.to_bech32();
-                    console.log('Decoded hex to bech32 client-side');
-                  } else if (window.MeshSDK || window.Mesh) {
-                    // Attempt Mesh utility if partially loaded
-                    const sdk = window.MeshSDK || window.Mesh;
-                    address = sdk.resolveAddress ? sdk.resolveAddress(hexAddress) : hexAddress;
-                  } else {
-                    // Last resort: send hex and rely on server decoding
-                    address = hexAddress;
-                    console.warn('No decoding library available — sending raw hex');
-                  }
-                }
-
-                if (!address) throw new Error('Could not retrieve a valid address.');
-
-                document.getElementById('cardanoAddress').value = address;
-                status.innerText = 'Success! Verifying...';
-                document.getElementById('verify-form').submit();
-              } catch (err) {
-                console.error('Connection error:', err);
-                const errorMsg = err.info || err.message || 'Connection refused';
-                status.innerHTML = '<span style="color: #dc3545;"><b>Connection Failed:</b> ' + errorMsg + '</span>';
-              }
-            }
-
-            start();
-          </script>
-
-          <script src="https://cdn.jsdelivr.net/npm/@emurgo/cardano-serialization-lib-browser/cardano_serialization_lib.js"></script>
-        </body>
-      </html>
-    `);
+    return res.send(renderWalletConnectPage(user.username, sessionId));
   } catch (error: any) {
-    console.error('Callback error:', error.response?.data || error.message);
-    res.status(500).send('An error occurred during verification.');
+    console.error('Callback error:', error?.response?.data || error?.message || error);
+    return res.status(500).send(
+      renderMessagePage({
+        title: 'Discord verification error',
+        eyebrow: 'Discord callback',
+        heading: 'We could not finish the Discord login step.',
+        lead: 'The verification portal reached Discord, but the callback flow failed before wallet validation could begin.',
+        tone: 'danger',
+        primaryAction: { href: '/login', label: 'Try Discord login again', variant: 'primary' },
+        secondaryAction: { href: '/', label: 'Back to start', variant: 'secondary' },
+      }),
+    );
   }
 });
 
-// Final Verification Endpoint
 app.post('/verify-final', async (req: Request, res: Response) => {
   const { sessionId, cardanoAddress } = req.body;
   const session = userSessions[sessionId];
 
   if (!session) {
-    return res.status(400).send('Session expired or invalid. Please try again.');
+    return res.status(400).send(
+      renderMessagePage({
+        title: 'Session expired',
+        eyebrow: 'Verification session',
+        heading: 'This verification session is no longer valid.',
+        lead: 'The temporary session expired before the final checks ran. Restart the flow and reconnect your wallet.',
+        tone: 'danger',
+        primaryAction: { href: '/', label: 'Start over', variant: 'primary' },
+        secondaryAction: { href: '/login', label: 'Login again', variant: 'secondary' },
+      }),
+    );
   }
 
-  try {
-    const { discordId, username } = session;
+  const { discordId, username } = session;
+  const submittedAddress =
+    typeof cardanoAddress === 'string' && cardanoAddress.trim().length > 0
+      ? cardanoAddress.trim()
+      : 'Wallet address unavailable';
 
-    // 1. Validate Account Age
+  const steps = createVerificationSteps();
+  let activeStepIndex = 0;
+
+  const sendFailure = (statusCode: number, heading: string, lead: string) =>
+    res.status(statusCode).send(
+      renderVerificationResultPage({
+        title: 'Verification blocked',
+        eyebrow: 'Eligibility check',
+        heading,
+        lead,
+        username,
+        walletAddress: submittedAddress,
+        steps,
+        tone: 'danger',
+        primaryAction: { href: '/', label: 'Start over', variant: 'primary' },
+        secondaryAction: {
+          href: 'https://github.com/Andamio-Platform/use-cases/tree/main/discord-role-gating',
+          label: 'View source',
+          variant: 'secondary',
+        },
+      }),
+    );
+
+  try {
     const creationDate = getAccountCreationDate(discordId);
     const ageResult = await checkAccountAge(creationDate);
+
     if (!ageResult.allowed) {
-      return res.status(403).send(`Verification failed: ${ageResult.reason}`);
+      markStepFailed(steps, 0, normalizeReason(ageResult.reason, 'The Discord account did not satisfy the minimum age requirement.'));
+      markRemainingBlocked(steps, 1);
+      return sendFailure(
+        403,
+        'Blocked at Discord account age',
+        'The Discord identity step completed, but the account did not satisfy the minimum age rule for this gated role.',
+      );
     }
 
-    // 2. Validate Cardano NFT Ownership using Mesh SDK
-    const { allowed: nftAllowed, reason: nftReason } = await checkNftOwnership(cardanoAddress);
-    if (!nftAllowed) {
-      return res.status(403).send(`Verification failed: ${nftReason}`);
+    markStepComplete(steps, 0, 'The Discord account passed the minimum age requirement.');
+
+    if (submittedAddress === 'Wallet address unavailable') {
+      markStepFailed(steps, 1, 'No wallet address was submitted. Reconnect your Cardano wallet and try again.');
+      markRemainingBlocked(steps, 2);
+      return sendFailure(
+        400,
+        'Blocked before wallet validation',
+        'The final verification request did not include a usable Cardano address, so the wallet-dependent checks could not run.',
+      );
     }
 
-    // 3. Check credential
-    const credentialResult = await checkCredential(nftReason as string[], config.REQUIRED_CREDENTIAL as string);
+    activeStepIndex = 1;
+    const nftResult = await checkNftOwnership(submittedAddress);
+
+    if (!nftResult.allowed) {
+      markStepFailed(
+        steps,
+        1,
+        normalizeReason(nftResult.reason, 'The connected wallet did not satisfy the NFT ownership requirement.'),
+      );
+      markRemainingBlocked(steps, 2);
+      return sendFailure(
+        403,
+        'Blocked at wallet asset validation',
+        'The Discord account passed, but the submitted wallet did not satisfy the NFT ownership rule required for this role.',
+      );
+    }
+
+    const aliases = extractAliases(nftResult.reason);
+    markStepComplete(steps, 1, describeAliases(aliases));
+
+    activeStepIndex = 2;
+    const credentialResult = await checkCredential(aliases, config.REQUIRED_CREDENTIAL as string);
+
     if (!credentialResult.allowed) {
-      return res.status(403).send(`Verification failed: ${credentialResult.reason}`);
+      markStepFailed(
+        steps,
+        2,
+        normalizeReason(credentialResult.reason, 'The required Andamio credential could not be confirmed.'),
+      );
+      markRemainingBlocked(steps, 3);
+      return sendFailure(
+        403,
+        'Blocked at credential validation',
+        'The wallet passed the asset check, but the required Andamio credential was not found on the detected handle set.',
+      );
     }
 
-    // 4. Assign role via bot
-    const result = await assignRole(discordId);
+    markStepComplete(
+      steps,
+      2,
+      config.REQUIRED_CREDENTIAL
+        ? `Required credential confirmed: ${config.REQUIRED_CREDENTIAL}`
+        : 'The required Andamio credential was confirmed.',
+    );
 
-    if (result.success) {
-      // Clear session
-      delete userSessions[sessionId];
-      res.send(`Successfully verified! Role has been assigned to <b>${username}</b>.`);
-    } else {
-      res.status(500).send(`Verification failed: ${result.message}`);
+    activeStepIndex = 3;
+    const roleResult = await assignRole(discordId);
+
+    if (!roleResult.success) {
+      markStepFailed(
+        steps,
+        3,
+        roleResult.message || 'Discord rejected the role assignment request.',
+      );
+      return sendFailure(
+        500,
+        'Eligible, but role assignment failed',
+        'All eligibility checks passed, but Discord did not accept the final role assignment request.',
+      );
     }
+
+    markStepComplete(steps, 3, `Role assigned successfully to ${username}.`);
+    delete userSessions[sessionId];
+
+    return res.send(
+      renderVerificationResultPage({
+        title: 'Role granted',
+        eyebrow: 'Verification complete',
+        heading: 'Role granted successfully',
+        lead: 'Every eligibility check passed, and the Discord bot assigned the configured role.',
+        username,
+        walletAddress: submittedAddress,
+        steps,
+        tone: 'success',
+        primaryAction: { href: '/', label: 'Verify another account', variant: 'primary' },
+        secondaryAction: {
+          href: 'https://github.com/Andamio-Platform/use-cases/tree/main/discord-role-gating',
+          label: 'View source',
+          variant: 'secondary',
+        },
+      }),
+    );
   } catch (error: any) {
     console.error('Final verification error:', error);
-    res.status(500).send('An error occurred during the final verification step.');
+    const message =
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : 'An unexpected system error interrupted the verification flow.';
+
+    if (steps[activeStepIndex] && steps[activeStepIndex].status === 'blocked') {
+      markStepFailed(steps, activeStepIndex, message);
+    }
+
+    markRemainingBlocked(steps, activeStepIndex + 1);
+
+    return sendFailure(
+      500,
+      'Verification could not be completed',
+      'The verification flow stopped because of an unexpected system error during the final validation stage.',
+    );
   }
 });
 

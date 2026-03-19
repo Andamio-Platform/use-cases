@@ -2,6 +2,8 @@
 
 A TypeScript-based system to verify users via Discord OAuth2 and automatically assign roles based on custom criteria (e.g., NFT ownership, account age).
 
+> Source code: [github.com/Andamio-Platform/use-cases/tree/main/discord-role-gating](https://github.com/Andamio-Platform/use-cases/tree/main/discord-role-gating)
+
 ## Features
 - **Web-based OAuth2 Flow:** Securely identifies Discord users.
 - **Slash Commands:** Users can start verification directly from Discord using `/verify`.

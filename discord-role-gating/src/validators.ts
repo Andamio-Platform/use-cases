@@ -64,7 +64,7 @@ export const checkNftOwnership = async (addressInput: string): Promise<Validatio
           console.warn(`Failed to decode asset name for unit: ${unit}`, err);
         }
         return true;
-      }``
+      }
       return false;
     });
 
@@ -83,6 +83,13 @@ export const checkCredential = async (aliases: string[], credential: string): Pr
   if (!config.ANDAMIO_API_KEY) {
     console.warn('Andamio API Key is missing. Skipping real credential check.');
     return { allowed: true };
+  }
+
+  if (aliases.length === 0) {
+    return {
+      allowed: false,
+      reason: 'A matching wallet asset was found, but no wallet handle could be derived for credential lookup.',
+    };
   }
 
   try {
