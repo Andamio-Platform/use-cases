@@ -8,6 +8,8 @@ Andamio Easy Onboarding is a Next.js app that guides a Cardano wallet holder thr
 
 The UI is built with the App Router, Tailwind CSS v4, and `@meshsdk/react`. Server routes proxy to Andamio preprod APIs and return unsigned transactions for the connected wallet to sign and submit.
 
+> Source code: [github.com/Andamio-Platform/use-cases/tree/main/easy-onboarding](https://github.com/Andamio-Platform/use-cases/tree/main/easy-onboarding)
+
 ## Features
 
 - Wallet-first onboarding flow with Mesh wallet integration
